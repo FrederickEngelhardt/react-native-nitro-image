@@ -1,56 +1,128 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { type AsyncImageSource, isHybridObject } from './AsyncImageSource'
 import { loadImage } from './loadImage'
 import { markHybridObject } from './markHybridObject'
 import type { Image } from './specs/Image.nitro'
 
 type Result =
-  // Loading State
   | {
       image: undefined
       error: undefined
     }
-  // Loaded state
   | {
       image: Image
       error: undefined
     }
-  // Error state
   | {
       image: undefined
       error: Error
     }
 
+function disposeImage(image: Image | undefined): void {
+  if (image == null) {
+    return
+  }
+
+  try {
+    image.dispose()
+  } catch {
+    // Ignore dispose errors. This is cleanup.
+  }
+}
+
+function getSourceKey(source: AsyncImageSource): string {
+  if (isHybridObject(source)) {
+    return `hybrid:${String(source)}`
+  }
+
+  return JSON.stringify(source)
+}
+
 /**
- * A hook to asynchronously load an image from the
- * given {@linkcode AsyncImageSource} into memory.
- * @example
- * ```ts
- * const { image, error } = useImage({ filePath: '/tmp/image.jpg' })
- * ```
+ * A hook to asynchronously load an image from the given AsyncImageSource into memory.
+ *
+ * Important: this hook owns the loaded Image and disposes it when the source changes
+ * or the component unmounts.
  */
 export function useImage(source: AsyncImageSource): Result {
-  const [image, setImage] = useState<Result>({
+  const sourceKey = useMemo(() => getSourceKey(source), [source])
+
+  const [result, setResult] = useState<Result>({
     image: undefined,
     error: undefined,
   })
 
-  // biome-ignore lint: The dependencies array is a bit hacky.
   useEffect(() => {
+    let isCancelled = false
+    let ownedImage: Image | undefined
+
+    setResult((previous) => {
+      disposeImage(previous.image)
+
+      return {
+        image: undefined,
+        error: undefined,
+      }
+    })
+
     ;(async () => {
       try {
-        // 1. Create the Image/ImageLoader instance
-        const result = await loadImage(source)
-        // 2. Add `__source` as a property on the JS side so React diffs properly
-        markHybridObject(result, source)
-        // 3. Update the state
-        setImage({ image: result, error: undefined })
+        const loadedImage = await loadImage(source)
+
+        if (isCancelled) {
+          disposeImage(loadedImage)
+          return
+        }
+
+        ownedImage = loadedImage
+        markHybridObject(loadedImage, source)
+
+        setResult((previous) => {
+          if (previous.image !== loadedImage) {
+            disposeImage(previous.image)
+          }
+
+          return {
+            image: loadedImage,
+            error: undefined,
+          }
+        })
       } catch (e) {
+        if (isCancelled) {
+          return
+        }
+
         const error = e instanceof Error ? e : new Error(`${e}`)
-        setImage({ image: undefined, error: error })
+
+        setResult((previous) => {
+          disposeImage(previous.image)
+
+          return {
+            image: undefined,
+            error,
+          }
+        })
       }
     })()
-  }, [isHybridObject(source) ? source : JSON.stringify(source)])
 
-  return image
+    return () => {
+      isCancelled = true
+
+      if (ownedImage != null) {
+        disposeImage(ownedImage)
+        ownedImage = undefined
+      }
+
+      setResult((previous) => {
+        disposeImage(previous.image)
+
+        return {
+          image: undefined,
+          error: undefined,
+        }
+      })
+    }
+  }, [sourceKey])
+
+  return result
 }
