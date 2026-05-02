@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { type AsyncImageSource, isHybridObject } from './AsyncImageSource'
+import { useEffect, useState } from 'react'
+import type { AsyncImageSource } from './AsyncImageSource'
 import { loadImage } from './loadImage'
 import { markHybridObject } from './markHybridObject'
 import type { Image } from './specs/Image.nitro'
@@ -26,27 +26,19 @@ function disposeImage(image: Image | undefined): void {
   try {
     image.dispose()
   } catch {
-    // Ignore dispose errors. This is cleanup.
+    // Ignore cleanup failures.
   }
-}
-
-function getSourceKey(source: AsyncImageSource): string {
-  if (isHybridObject(source)) {
-    return `hybrid:${String(source)}`
-  }
-
-  return JSON.stringify(source)
 }
 
 /**
  * A hook to asynchronously load an image from the given AsyncImageSource into memory.
  *
- * Important: this hook owns the loaded Image and disposes it when the source changes
- * or the component unmounts.
+ * The returned Image is owned by this hook and is disposed when:
+ * - source changes
+ * - the component unmounts
+ * - an async load resolves after cleanup
  */
 export function useImage(source: AsyncImageSource): Result {
-  const sourceKey = useMemo(() => getSourceKey(source), [source])
-
   const [result, setResult] = useState<Result>({
     image: undefined,
     error: undefined,
@@ -112,17 +104,8 @@ export function useImage(source: AsyncImageSource): Result {
         disposeImage(ownedImage)
         ownedImage = undefined
       }
-
-      setResult((previous) => {
-        disposeImage(previous.image)
-
-        return {
-          image: undefined,
-          error: undefined,
-        }
-      })
     }
-  }, [sourceKey])
+  }, [source])
 
   return result
 }

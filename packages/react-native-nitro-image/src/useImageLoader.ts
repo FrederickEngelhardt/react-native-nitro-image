@@ -1,47 +1,38 @@
 import { useEffect, useMemo } from 'react'
-import { type AsyncImageSource, isHybridObject } from './AsyncImageSource'
+import type { AsyncImageSource } from './AsyncImageSource'
 import { createImageLoader } from './createImageLoader'
 import { markHybridObject } from './markHybridObject'
 import type { Image } from './specs/Image.nitro'
 import type { ImageLoader } from './specs/ImageLoader.nitro'
 
-function getSourceKey(source: AsyncImageSource): string {
-  if (isHybridObject(source)) {
-    return `hybrid:${String(source)}`
-  }
-
-  return JSON.stringify(source)
-}
-
-function disposeLoader(loader: Image | ImageLoader | undefined): void {
-  if (loader == null) {
+function disposeImageOrLoader(
+  imageOrLoader: Image | ImageLoader | undefined,
+): void {
+  if (imageOrLoader == null) {
     return
   }
 
   try {
-    loader.dispose()
+    imageOrLoader.dispose()
   } catch {
-    // Cleanup path. Ignore dispose failures.
+    // Ignore cleanup failures.
   }
 }
 
 export function useImageLoader(
   source: AsyncImageSource,
 ): Image | ImageLoader | undefined {
-  const sourceKey = useMemo(() => getSourceKey(source), [source])
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: <sourceKey is derived from source and must reset the loader on change>
-  const loader = useMemo<Image | ImageLoader | undefined>(() => {
-    const nextLoader = createImageLoader(source)
-    markHybridObject(nextLoader, source)
-    return nextLoader
-  }, [sourceKey, source])
+  const imageOrLoader = useMemo<Image | ImageLoader | undefined>(() => {
+    const nextImageOrLoader = createImageLoader(source)
+    markHybridObject(nextImageOrLoader, source)
+    return nextImageOrLoader
+  }, [source])
 
   useEffect(() => {
     return () => {
-      disposeLoader(loader)
+      disposeImageOrLoader(imageOrLoader)
     }
-  }, [loader])
+  }, [imageOrLoader])
 
-  return loader
+  return imageOrLoader
 }
